@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 
 from typing import List, Optional
+from einops import rearrange
 
 class PrepareForMultiHeadAttention(nn.Module):
     """ A module to prepare input for multi-head attention by projecting the input tensor into multiple heads with specified dimensions.
@@ -16,7 +17,7 @@ class PrepareForMultiHeadAttention(nn.Module):
     Inputs:
         x (torch.Tensor): Input tensor of shape (batch_size, seq_len, d_model).
     Outputs:
-        torch.Tensor: Output tensor of shape (batch_size, seq_len, n_heads, d_heads).
+        torch.Tensor: Output tensor of shape (batch_size, n_heads, seq_len, d_heads).
     Example:
         >>> d_model = 512
         >>> n_heads = 8
@@ -26,7 +27,7 @@ class PrepareForMultiHeadAttention(nn.Module):
         >>> mha_preparer = PrepareForMultiHeadAttention(d_model, n_heads, d_heads, bias)
         >>> output_tensor = mha_preparer(input_tensor)
         >>> output_tensor.shape
-        torch.Size([32, 10, 8, 64])
+        torch.Size([32, 8, 10, 64])
     """
     def __init__(self, d_model: int, n_heads: int, d_heads: int, bias: bool):
         super().__init__()
@@ -36,13 +37,11 @@ class PrepareForMultiHeadAttention(nn.Module):
         self.d_heads = d_heads
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        head_shape = x.shape[:-1]
-
         # Apply the linear transformation to the input tensor
         x = self.linear(x)
-        # Reshape the output to (seq_len, batch_size, n_heads, d_heads)
-        x = x.view(*head_shape, self.n_heads, self.d_heads)
-
+        # Rearrange the output to (batch_size, seq_len, n_heads, d_heads)
+        x = rearrange(x, 'b s (h d) -> b h s d', h=self.n_heads)
+        
         return x
 
 class MultiHeadAttention(nn.Module):
@@ -63,15 +62,14 @@ class MultiHeadAttention(nn.Module):
 
     def get_scores(self, query: torch.Tensor, key: torch.Tensor) -> torch.Tensor:
 
-
-        return torch.einsum("bihd,bjhd->bijh", query, key)
+        return torch.einsum("bhid,bhjd->bhij", query, key)
 
     def prepare_mask(self, mask: torch.Tensor, query_shape: List[int], key_shape: List[int]) -> torch.Tensor:
         assert mask.shape[0] == 1 or mask.shape[0] == query_shape[0], "Mask batch size must match query batch size."
         assert mask.shape[1] == 1 or mask.shape[1] == query_shape[1], "Mask sequence length must match query sequence length."
         assert mask.shape[2] == key_shape[1], "Mask sequence length must match key sequence length."
         
-        mask = mask.unsqueeze(-1)
+        mask = mask.unsqueeze(1) # Add head dimension
         
         return mask
 
@@ -81,7 +79,7 @@ class MultiHeadAttention(nn.Module):
                 value: torch.Tensor, 
                 mask: Optional[torch.Tensor]) -> torch.Tensor:
         
-        seq_len, batch_size, _ = query.shape
+        batch_size, seq_len, _ = query.shape
 
         if mask is not None:
             mask = self.prepare_mask(mask, query.shape, key.shape)
@@ -98,11 +96,11 @@ class MultiHeadAttention(nn.Module):
         attn = self.softmax(scores)
         attn = self.dropout(attn)
 
-        x = torch.einsum("bijh,bjhd->bihd", attn, value)
+        x = torch.einsum("bhij,bhjd->bihd", attn, value)
 
         self.attn = attn.detach()
 
-        x = x.reshape(seq_len, batch_size, -1)
+        x = x.reshape(batch_size, seq_len, -1)
 
         return self.output(x)
     

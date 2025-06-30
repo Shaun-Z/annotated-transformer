@@ -2,9 +2,9 @@ import math
 import torch
 import torch.nn as nn
 
-from mha import MultiHeadAttention
-from feed_forward import FeedForward
-from positional_encoding import get_positional_encoding
+from .mha import MultiHeadAttention
+from .feed_forward import FeedForward
+from .positional_encoding import get_positional_encoding
 import copy
 
 class TransformerLayer(nn.Module):
@@ -83,7 +83,7 @@ class Encoder(nn.Module):
         # Final normalization layer
         self.norm = nn.LayerNorm([layer.size])
     
-    def forward(self, *,
+    def forward(self,
                 x: torch.Tensor, 
                 mask: torch.Tensor) -> torch.Tensor:
         
@@ -104,7 +104,7 @@ class Decoder(nn.Module):
         self.layers = nn.ModuleList([copy.deepcopy(layer) for _ in range(n_layers)])
         self.norm = nn.LayerNorm([layer.size])
     
-    def forward(self, *,
+    def forward(self,
                 x: torch.Tensor, 
                 memory: torch.Tensor, 
                 src_mask: torch.Tensor, 
@@ -117,19 +117,6 @@ class Decoder(nn.Module):
         # Normalize the final output
         return self.norm(x)
     
-class Generator(nn.Module):
-    """
-    This predicts the tokens and gives the lof softmax of those.
-    You don't need this if you are using `nn.CrossEntropyLoss`.
-    """
-
-    def __init__(self, d_model: int, n_vocab: int):
-        super().__init__()
-        self.projection = nn.Linear(d_model, n_vocab)
-
-    def forward(self, x):
-        return self.projection(x)
-
 class EncoderDecoder(nn.Module):
     def __init__(self, encoder: Encoder, decoder: Decoder, src_embed: nn.Module, tgt_embed: nn.Module, generator: nn.Module):
         super().__init__()
@@ -157,6 +144,19 @@ class EncoderDecoder(nn.Module):
         tgt_embedded = self.tgt_embed(tgt)
         # Pass through the decoder
         return self.decoder(tgt_embedded, memory, src_mask, tgt_mask)
+
+class Generator(nn.Module):
+    """
+    This predicts the tokens and gives the lof softmax of those.
+    You don't need this if you are using `nn.CrossEntropyLoss`.
+    """
+
+    def __init__(self, d_model: int, n_vocab: int):
+        super().__init__()
+        self.projection = nn.Linear(d_model, n_vocab)
+
+    def forward(self, x):
+        return self.projection(x)
 
 class EmbeddingsWithPositionalEncoding(nn.Module):
     """
